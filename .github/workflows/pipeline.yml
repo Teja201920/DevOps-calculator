@@ -85,7 +85,7 @@ jobs:
           vuln-type: os,library
           severity: HIGH,CRITICAL
 
-      # ── Docker Hub login and push (main branch only) ─────────────────
+      # ── Docker Hub login and push (main branch only) ─────────────
       - name: Log in to Docker Hub
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
