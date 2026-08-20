@@ -76,7 +76,7 @@ jobs:
 
       # ── Trivy security scan (before push to Docker Hub) ──────────────
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:test
           format: table
