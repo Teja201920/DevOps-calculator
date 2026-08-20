@@ -1,0 +1,135 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  IMAGE_NAME: calculator-devops
+  CONTAINER_NAME: calculator-devops
+  TEST_PORT: 8080
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Source checkout ──────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Basic static file validation ─────────────────────────────────
+      - name: Verify required project files exist
+        run: |
+          test -f index.html
+          test -f style.css
+          test -f script.js
+          test -f Dockerfile
+          echo "All required files are present."
+
+      - name: Verify HTML contains calculator markup
+        run: |
+          grep -q 'class="calculator"' index.html
+          grep -q 'data-current-operand' index.html
+          grep -q 'data-previous-operand' index.html
+          echo "Calculator markup verified."
+
+      - name: Verify JavaScript does not use eval()
+        run: |
+          if grep -q '\beval\s*(' script.js; then
+            echo "eval() must not be used in script.js"
+            exit 1
+          fi
+          echo "No eval() usage detected."
+
+      # ── Docker build ─────────────────────────────────────────────────
+      - name: Build Docker image
+        run: docker build -t ${{ env.IMAGE_NAME }}:test .
+
+      # ── Run container and test locally in CI ─────────────────────────
+      - name: Run Docker container for testing
+        run: |
+          docker run -d \
+            -p ${{ env.TEST_PORT }}:80 \
+            --name ${{ env.CONTAINER_NAME }}-ci \
+            ${{ env.IMAGE_NAME }}:test
+
+      - name: Wait for container to become ready
+        run: sleep 3
+
+      - name: Test webpage with curl
+        run: |
+          curl --fail --silent --show-error --output /dev/null --write-out "HTTP %{http_code}\n" \
+            http://localhost:${{ env.TEST_PORT }}
+          curl --fail --silent http://localhost:${{ env.TEST_PORT }} | grep -q "DEVOPS CALCULATOR"
+          echo "Local container test passed."
+
+      - name: Stop and remove CI test container
+        if: always()
+        run: |
+          docker stop ${{ env.CONTAINER_NAME }}-ci || true
+          docker rm ${{ env.CONTAINER_NAME }}-ci || true
+
+      # ── Trivy security scan (before push to Docker Hub) ──────────────
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:test
+          format: table
+          exit-code: 1
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+
+      # ── Docker Hub login and push (main branch only) ─────────────────
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tag Docker image for Docker Hub
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker tag ${{ env.IMAGE_NAME }}:test \
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+          docker tag ${{ env.IMAGE_NAME }}:test \
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Push Docker image to Docker Hub
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      # ── EC2 deployment via SSH (main branch only) ────────────────────
+      - name: Deploy to EC2
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/calculator-devops:latest
+            docker stop calculator-devops || true
+            docker rm calculator-devops || true
+            docker run -d \
+              -p 80:80 \
+              --name calculator-devops \
+              --restart unless-stopped \
+              ${{ secrets.DOCKERHUB_USERNAME }}/calculator-devops:latest
+
+      # ── Post-deployment smoke test ───────────────────────────────────
+      - name: Test deployed application on EC2
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          curl --fail --silent --show-error --output /dev/null --write-out "HTTP %{http_code}\n" \
+            http://${{ secrets.EC2_HOST }}
+          curl --fail --silent http://${{ secrets.EC2_HOST }} | grep -q "DEVOPS CALCULATOR"
+          echo "EC2 deployment test passed."
