@@ -18,11 +18,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ── Source checkout ──────────────────────────────────────────────
+
+      # ─────────────────────────────────────────────
+      # 1. Checkout source code
+      # ─────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── Basic static file validation ─────────────────────────────────
+
+      # ─────────────────────────────────────────────
+      # 2. Basic project validation
+      # ─────────────────────────────────────────────
       - name: Verify required project files exist
         run: |
           test -f index.html
@@ -31,6 +37,7 @@ jobs:
           test -f Dockerfile
           echo "All required files are present."
 
+
       - name: Verify HTML contains calculator markup
         run: |
           grep -q 'class="calculator"' index.html
@@ -38,19 +45,29 @@ jobs:
           grep -q 'data-previous-operand' index.html
           echo "Calculator markup verified."
 
+
       - name: Verify JavaScript does not use eval()
         run: |
           if grep -q '\beval\s*(' script.js; then
             echo "eval() must not be used in script.js"
             exit 1
           fi
+
           echo "No eval() usage detected."
 
-      # ── Docker build ─────────────────────────────────────────────────
-      - name: Build Docker image
-        run: docker build -t ${{ env.IMAGE_NAME }}:test .
 
-      # ── Run container and test locally in CI ─────────────────────────
+      # ─────────────────────────────────────────────
+      # 3. Build Docker image
+      # ─────────────────────────────────────────────
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ env.IMAGE_NAME }}:test .
+
+
+      # ─────────────────────────────────────────────
+      # 4. Run Docker container locally
+      # ─────────────────────────────────────────────
       - name: Run Docker container for testing
         run: |
           docker run -d \
@@ -58,26 +75,45 @@ jobs:
             --name ${{ env.CONTAINER_NAME }}-ci \
             ${{ env.IMAGE_NAME }}:test
 
+
       - name: Wait for container to become ready
-        run: sleep 3
+        run: |
+          sleep 3
 
-      # - name: Test deployed application on EC2
-      #   run: |
-      #     echo "Testing calculator at http://${{ secrets.EC2_HOST }}"
 
-      #     HTTP_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" \
-      #       "http://${{ secrets.EC2_HOST }}")
+      # ─────────────────────────────────────────────
+      # 5. Test local Docker container
+      # ─────────────────────────────────────────────
+      - name: Test webpage with curl
+        run: |
+          HTTP_STATUS=$(curl -sS \
+            -o /dev/null \
+            -w "%{http_code}" \
+            http://localhost:${{ env.TEST_PORT }})
 
-      #     echo "HTTP status: $HTTP_STATUS"
+          echo "HTTP Status: $HTTP_STATUS"
 
-      #     if [ "$HTTP_STATUS" = "200" ]; then
-      #       echo "✅ Calculator is successfully deployed on EC2"
-      #     else
-      #       echo "❌ Calculator deployment test failed"
-      #       exit 1
-      #     fi
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "Local container test passed."
+          else
+            echo "Local container test failed."
+            exit 1
+          fi
 
-      # ── Trivy security scan (before push to Docker Hub) ──────────────
+
+      # ─────────────────────────────────────────────
+      # 6. Stop test container
+      # ─────────────────────────────────────────────
+      - name: Stop and remove CI test container
+        if: always()
+        run: |
+          docker stop ${{ env.CONTAINER_NAME }}-ci || true
+          docker rm ${{ env.CONTAINER_NAME }}-ci || true
+
+
+      # ─────────────────────────────────────────────
+      # 7. Trivy vulnerability scan
+      # ─────────────────────────────────────────────
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -88,7 +124,10 @@ jobs:
           vuln-type: os,library
           severity: HIGH,CRITICAL
 
-      # ── Docker Hub login and push (main branch only) ─────────────
+
+      # ─────────────────────────────────────────────
+      # 8. Login to Docker Hub
+      # ─────────────────────────────────────────────
       - name: Log in to Docker Hub
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
@@ -96,21 +135,38 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+
+      # ─────────────────────────────────────────────
+      # 9. Tag Docker image
+      # ─────────────────────────────────────────────
       - name: Tag Docker image for Docker Hub
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          docker tag ${{ env.IMAGE_NAME }}:test \
+          docker tag \
+            ${{ env.IMAGE_NAME }}:test \
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
-          docker tag ${{ env.IMAGE_NAME }}:test \
+
+          docker tag \
+            ${{ env.IMAGE_NAME }}:test \
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
+
+      # ─────────────────────────────────────────────
+      # 10. Push image to Docker Hub
+      # ─────────────────────────────────────────────
       - name: Push Docker image to Docker Hub
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push \
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
 
-      # ── EC2 deployment via SSH (main branch only) ────────────────────
+          docker push \
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+
+      # ─────────────────────────────────────────────
+      # 11. Deploy to EC2
+      # ─────────────────────────────────────────────
       - name: Deploy to EC2
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: appleboy/ssh-action@v1.0.3
@@ -118,21 +174,55 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
+
           script: |
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/calculator-devops:latest
+            echo "Pulling latest Docker image..."
+
+            docker pull \
+              ${{ secrets.DOCKERHUB_USERNAME }}/calculator-devops:latest
+
+            echo "Stopping existing container..."
+
             docker stop calculator-devops || true
+
+            echo "Removing existing container..."
+
             docker rm calculator-devops || true
+
+            echo "Starting new calculator container..."
+
             docker run -d \
               -p 80:80 \
               --name calculator-devops \
               --restart unless-stopped \
               ${{ secrets.DOCKERHUB_USERNAME }}/calculator-devops:latest
 
-      # ── Post-deployment smoke test ───────────────────────────────────
+            echo "Checking running container..."
+
+            docker ps
+
+            echo "EC2 deployment completed successfully."
+
+
+      # ─────────────────────────────────────────────
+      # 12. Test application deployed on EC2
+      # ─────────────────────────────────────────────
       - name: Test deployed application on EC2
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          curl --fail --silent --show-error --output /dev/null --write-out "HTTP %{http_code}\n" \
-            http://${{ secrets.EC2_HOST }}
-          curl --fail --silent http://${{ secrets.EC2_HOST }} | grep -q "DEVOPS CALCULATOR"
-          echo "EC2 deployment test passed."
+          echo "Testing calculator application on EC2..."
+
+          HTTP_STATUS=$(curl -sS \
+            -o /dev/null \
+            -w "%{http_code}" \
+            http://${{ secrets.EC2_HOST }})
+
+          echo "EC2 HTTP Status: $HTTP_STATUS"
+
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "EC2 deployment test passed."
+            echo "Calculator is successfully deployed and accessible."
+          else
+            echo "EC2 deployment test failed."
+            exit 1
+          fi
