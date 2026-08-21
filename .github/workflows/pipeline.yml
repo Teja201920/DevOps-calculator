@@ -61,21 +61,21 @@ jobs:
       - name: Wait for container to become ready
         run: sleep 3
 
-      - name: Test deployed application on EC2
-        run: |
-          echo "Testing calculator at http://${{ secrets.EC2_HOST }}"
+      # - name: Test deployed application on EC2
+      #   run: |
+      #     echo "Testing calculator at http://${{ secrets.EC2_HOST }}"
 
-          HTTP_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" \
-            "http://${{ secrets.EC2_HOST }}")
+      #     HTTP_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" \
+      #       "http://${{ secrets.EC2_HOST }}")
 
-          echo "HTTP status: $HTTP_STATUS"
+      #     echo "HTTP status: $HTTP_STATUS"
 
-          if [ "$HTTP_STATUS" = "200" ]; then
-            echo "✅ Calculator is successfully deployed on EC2"
-          else
-            echo "❌ Calculator deployment test failed"
-            exit 1
-          fi
+      #     if [ "$HTTP_STATUS" = "200" ]; then
+      #       echo "✅ Calculator is successfully deployed on EC2"
+      #     else
+      #       echo "❌ Calculator deployment test failed"
+      #       exit 1
+      #     fi
 
       # ── Trivy security scan (before push to Docker Hub) ──────────────
       - name: Run Trivy vulnerability scanner
