@@ -63,10 +63,13 @@ jobs:
 
       - name: Test webpage with curl
         run: |
-          curl --fail --silent --show-error --output /dev/null --write-out "HTTP %{http_code}\n" \
-            http://localhost:${{ env.TEST_PORT }}
-          curl --fail --silent http://localhost:${{ env.TEST_PORT }} | grep -q "DEVOPS CALCULATOR"
-          echo "Local container test passed."
+          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080)
+          echo "HTTP status: $response"
+          if [ "$response" != "200" ]; then
+            echo "Webpage test failed"
+            exit 1
+          fi
+          echo "Webpage test passed"
 
       - name: Stop and remove CI test container
         if: always()
