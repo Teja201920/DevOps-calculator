@@ -61,21 +61,21 @@ jobs:
       - name: Wait for container to become ready
         run: sleep 3
 
-      - name: Test webpage with curl
+      - name: Test deployed application on EC2
         run: |
-          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080)
-          echo "HTTP status: $response"
-          if [ "$response" != "200" ]; then
-            echo "Webpage test failed"
+          echo "Testing calculator at http://${{ secrets.EC2_HOST }}"
+
+          HTTP_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" \
+            "http://${{ secrets.EC2_HOST }}")
+
+          echo "HTTP status: $HTTP_STATUS"
+
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "✅ Calculator is successfully deployed on EC2"
+          else
+            echo "❌ Calculator deployment test failed"
             exit 1
           fi
-          echo "Webpage test passed"
-
-      - name: Stop and remove CI test container
-        if: always()
-        run: |
-          docker stop ${{ env.CONTAINER_NAME }}-ci || true
-          docker rm ${{ env.CONTAINER_NAME }}-ci || true
 
       # ── Trivy security scan (before push to Docker Hub) ──────────────
       - name: Run Trivy vulnerability scanner
