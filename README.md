@@ -8,7 +8,7 @@ A fully functional calculator web application built for learning **Docker**, **G
 
 ---
 
-## 1. Project Overview
+## 1. Project Overview 
 
 This project demonstrates a complete DevOps workflow:
 
@@ -307,5 +307,6 @@ Visit **http://YOUR_EC2_PUBLIC_IP** in your browser to use the deployed calculat
 ---
 
 ## License
+
 
 This is a learning project. Use it freely for education and experimentation.
