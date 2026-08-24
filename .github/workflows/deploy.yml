@@ -39,3 +39,28 @@ jobs:
         run: |
           docker push $IMAGE_NAME:${{ github.sha }}
           docker push $IMAGE_NAME:latest
+
+  deploy:
+    needs: build-scan-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to AWS EC2
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            sudo docker pull tejaswarrao/devops-calculator:latest
+
+            sudo docker stop devops-calculator || true
+            sudo docker rm devops-calculator || true
+
+            sudo docker run -d \
+              --name devops-calculator \
+              --restart unless-stopped \
+              -p 80:80 \
+              tejaswarrao/devops-calculator:latest
+
+            sudo docker image prune -f
